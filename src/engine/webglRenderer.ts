@@ -32,6 +32,8 @@ uniform float u_showOriginal;
 uniform vec3 u_shadowColor;
 uniform vec3 u_midtoneColor;
 uniform vec3 u_highlightColor;
+uniform vec2 u_uvScale;
+uniform vec2 u_uvOffset;
 
 varying vec2 v_texCoord;
 
@@ -104,8 +106,10 @@ vec3 applyGradientMap(float t) {
 }
 
 void main() {
-  vec2 uv = v_texCoord;
-  vec4 rawSample = texture2D(u_image, uv);
+  vec2 uv = v_texCoord * u_uvScale + u_uvOffset;
+  bool outOfBounds = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0;
+  vec2 safeUv = clamp(uv, 0.001, 0.999);
+  vec4 rawSample = outOfBounds ? vec4(0.06, 0.06, 0.055, 1.0) : texture2D(u_image, safeUv);
 
   if (u_showOriginal > 0.5) {
     gl_FragColor = vec4(rawSample.rgb, 1.0);
@@ -119,10 +123,10 @@ void main() {
   vec2 offsetR = vec2(shiftPx * px.x, -shiftPx * 0.55 * px.y);
   vec2 offsetB = vec2(-shiftPx * 0.75 * px.x, shiftPx * 0.7 * px.y);
 
-  vec3 baseCenter = sampleBleed(uv, px, u_inkBleed);
-  float rChan = sampleBleed(clamp(uv + offsetR, 0.001, 0.999), px, u_inkBleed).r;
+  vec3 baseCenter = outOfBounds ? u_highlightColor : sampleBleed(safeUv, px, u_inkBleed);
+  float rChan = outOfBounds ? u_highlightColor.r : sampleBleed(clamp(safeUv + offsetR, 0.001, 0.999), px, u_inkBleed).r;
   float gChan = baseCenter.g;
-  float bChan = sampleBleed(clamp(uv + offsetB, 0.001, 0.999), px, u_inkBleed).b;
+  float bChan = outOfBounds ? u_highlightColor.b : sampleBleed(clamp(safeUv + offsetB, 0.001, 0.999), px, u_inkBleed).b;
   vec3 misregColor = vec3(rChan, gChan, bChan);
 
   // 2. Contrast & Ink Punch
@@ -146,7 +150,9 @@ void main() {
 
   // 5. Gradient Map or Vintage Multi-Ink Color
   vec3 printedColor;
-  if (u_useGradientMap > 0.5) {
+  if (outOfBounds) {
+    printedColor = u_useGradientMap > 0.5 ? u_highlightColor : mix(vec3(0.92, 0.9, 0.86), u_highlightColor, 0.4);
+  } else if (u_useGradientMap > 0.5) {
     printedColor = applyGradientMap(screened);
   } else {
     // Vintage faded ink preservation tinted by highlight paper
@@ -297,6 +303,8 @@ export class VintagePrintWebGLRenderer {
       'u_shadowColor',
       'u_midtoneColor',
       'u_highlightColor',
+      'u_uvScale',
+      'u_uvOffset',
     ];
 
     for (const name of uniformNames) {
@@ -322,6 +330,8 @@ export class VintagePrintWebGLRenderer {
       showOriginal?: boolean;
       animateGrain?: boolean;
       uploadTexture?: boolean;
+      uvScale?: [number, number];
+      uvOffset?: [number, number];
     }
   ): void {
     const gl = this.gl;
@@ -348,6 +358,8 @@ export class VintagePrintWebGLRenderer {
     const shadow = hexToRgbNormalized(gradient.shadow);
     const midtone = hexToRgbNormalized(gradient.midtone);
     const highlight = hexToRgbNormalized(gradient.highlight);
+    const uvScale = options.uvScale ?? [1, 1];
+    const uvOffset = options.uvOffset ?? [0, 0];
 
     gl.uniform1i(this.uniforms.u_image, 0);
     gl.uniform2f(this.uniforms.u_resolution, targetW, targetH);
@@ -366,6 +378,8 @@ export class VintagePrintWebGLRenderer {
     gl.uniform3f(this.uniforms.u_shadowColor, shadow[0], shadow[1], shadow[2]);
     gl.uniform3f(this.uniforms.u_midtoneColor, midtone[0], midtone[1], midtone[2]);
     gl.uniform3f(this.uniforms.u_highlightColor, highlight[0], highlight[1], highlight[2]);
+    gl.uniform2f(this.uniforms.u_uvScale, uvScale[0], uvScale[1]);
+    gl.uniform2f(this.uniforms.u_uvOffset, uvOffset[0], uvOffset[1]);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }

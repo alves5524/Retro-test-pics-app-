@@ -182,3 +182,53 @@ export function getPresetById(id: string): PrintPreset {
 export function getGradientMapById(id: string): GradientMap {
   return GRADIENT_MAPS.find((g) => g.id === id) ?? GRADIENT_MAPS[0];
 }
+
+function randRange(min: number, max: number, rng: () => number): number {
+  return min + (max - min) * rng();
+}
+
+export function generateRandomLook(
+  currentPresetId?: string,
+  currentGradientId?: string,
+  rng: () => number = Math.random
+): {
+  presetId: string;
+  gradientMap: GradientMap;
+  params: import('../types/studio').EffectParams;
+} {
+  const presetPool =
+    PRINT_PRESETS.length > 1 && currentPresetId
+      ? PRINT_PRESETS.filter((p) => p.id !== currentPresetId)
+      : PRINT_PRESETS;
+  const pickedPreset = presetPool[Math.floor(rng() * presetPool.length)] ?? PRINT_PRESETS[0];
+
+  // Alternate between matching preset gradient and exploring another gradient map
+  const mixGradient = rng() > 0.4;
+  let pickedGradient = getGradientMapById(pickedPreset.gradientMapId);
+  if (mixGradient) {
+    const gradPool =
+      GRADIENT_MAPS.length > 1 && currentGradientId
+        ? GRADIENT_MAPS.filter((g) => g.id !== currentGradientId)
+        : GRADIENT_MAPS;
+    pickedGradient = gradPool[Math.floor(rng() * gradPool.length)] ?? pickedGradient;
+  }
+
+  const jitter = (val: number, span: number, min = 0, max = 1) =>
+    Math.max(min, Math.min(max, Number((val + randRange(-span, span, rng)).toFixed(2))));
+
+  return {
+    presetId: pickedPreset.id,
+    gradientMap: { ...pickedGradient },
+    params: {
+      intensity: 1,
+      contrast: jitter(pickedPreset.params.contrast, 0.14, 0.35, 0.9),
+      halftoneScale: jitter(pickedPreset.params.halftoneScale, 0.22, 0, 0.9),
+      halftoneAngle: Math.round(randRange(10, 65, rng)),
+      grain: jitter(pickedPreset.params.grain, 0.18, 0.12, 0.92),
+      paperTexture: jitter(pickedPreset.params.paperTexture, 0.18, 0.15, 0.9),
+      misregistration: jitter(pickedPreset.params.misregistration, 0.18, 0, 0.78),
+      inkBleed: jitter(pickedPreset.params.inkBleed, 0.12, 0.05, 0.5),
+      useGradientMap: true,
+    },
+  };
+}

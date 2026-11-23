@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   RotateCcw,
   Sparkles,
+  Shuffle,
   Eye,
   Play,
   Pause,
@@ -14,13 +15,20 @@ import type {
   EffectParams,
   GradientMap,
   MediaAnalysis,
+  MediaFormatConfig,
   MediaSourceInfo,
 } from '../types/studio';
 import { GRADIENT_MAPS, PRINT_PRESETS } from '../engine/presets';
+import {
+  ASPECT_OPTIONS,
+  EXPORT_SIZE_OPTIONS,
+  computeFitTransform,
+  computeOutputDimensions,
+} from '../engine/format';
 import { VintagePrintWebGLRenderer } from '../engine/webglRenderer';
 import { drawProceduralMotionFrame } from '../utils/sampleMedia';
 
-type ControlTab = 'presets' | 'gradients' | 'params';
+type ControlTab = 'presets' | 'gradients' | 'params' | 'format';
 
 interface StepStudioProps {
   mediaInfo: MediaSourceInfo;
@@ -30,11 +38,14 @@ interface StepStudioProps {
   activePresetId: string;
   gradientMap: GradientMap;
   params: EffectParams;
+  formatConfig: MediaFormatConfig;
   onSelectPreset: (presetId: string) => void;
   onSelectGradientMap: (map: GradientMap) => void;
   onUpdateGradientColor: (key: 'shadow' | 'midtone' | 'highlight', value: string) => void;
   onUpdateParam: <K extends keyof EffectParams>(key: K, value: EffectParams[K]) => void;
+  onUpdateFormatConfig: (patch: Partial<MediaFormatConfig>) => void;
   onApplySmartAutoTune: () => void;
+  onRandomizeEffect: () => void;
   onChangeMedia: () => void;
   registerPrimarySaveHandler: (fn: (() => void) | null) => void;
   onExportStateChange: (exporting: boolean) => void;
@@ -61,11 +72,14 @@ export function StepStudio({
   activePresetId,
   gradientMap,
   params,
+  formatConfig,
   onSelectPreset,
   onSelectGradientMap,
   onUpdateGradientColor,
   onUpdateParam,
+  onUpdateFormatConfig,
   onApplySmartAutoTune,
+  onRandomizeEffect,
   onChangeMedia,
   registerPrimarySaveHandler,
   onExportStateChange,
@@ -97,7 +111,22 @@ export function StepStudio({
 
   const isVideoMode = mediaInfo.kind !== 'image';
   const durationSec = mediaInfo.durationSec ?? 6;
-  const [renderW, renderH] = computeDisplaySize(mediaInfo.width, mediaInfo.height, 1280);
+  const exportDims = computeOutputDimensions(
+    mediaInfo.width,
+    mediaInfo.height,
+    formatConfig.aspectRatio,
+    formatConfig.exportSize
+  );
+  const [renderW, renderH] = computeDisplaySize(exportDims.width, exportDims.height, 1280);
+  const fitTransform = computeFitTransform(
+    mediaInfo.width,
+    mediaInfo.height,
+    renderW,
+    renderH,
+    formatConfig.fitMode
+  );
+  const fitTransformRef = useRef(fitTransform);
+  fitTransformRef.current = fitTransform;
 
   // Initialize WebGL renderer once when canvas mounts
   useEffect(() => {
@@ -151,14 +180,27 @@ export function StepStudio({
       showOriginal: showOriginalRef.current,
       animateGrain: isVideoMode && isPlayingRef.current,
       uploadTexture,
+      uvScale: fitTransformRef.current.uvScale,
+      uvOffset: fitTransformRef.current.uvOffset,
     });
   };
 
-  // On-demand render whenever parameters, gradient map, compare toggle, or static image change
+  // On-demand render whenever parameters, gradient map, compare toggle, format, or static image change
   useEffect(() => {
     renderCurrentFrame(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params, gradientMap, showOriginal, imageElement, mediaInfo.id, renderW, renderH]);
+  }, [
+    params,
+    gradientMap,
+    showOriginal,
+    imageElement,
+    mediaInfo.id,
+    renderW,
+    renderH,
+    formatConfig.aspectRatio,
+    formatConfig.exportSize,
+    formatConfig.fitMode,
+  ]);
 
   // Low-latency video / procedural motion playback loop (only active while playing!)
   useEffect(() => {
@@ -254,8 +296,9 @@ export function StepStudio({
     const baseName = mediaInfo.name.replace(/\.[^/.]+$/, '');
     const filename = `${baseName}-prensa.${ext}`;
 
-    // Render at high resolution using an offscreen WebGL canvas for crisp export
-    const [expW, expH] = computeDisplaySize(mediaInfo.width, mediaInfo.height, 2400);
+    // Render at selected export dimensions using an offscreen WebGL canvas
+    const expW = exportDims.width;
+    const expH = exportDims.height;
     const exportCanvas = document.createElement('canvas');
     const expRenderer = new VintagePrintWebGLRenderer(exportCanvas);
 
@@ -271,6 +314,8 @@ export function StepStudio({
         showOriginal: showOriginalRef.current,
         animateGrain: false,
         uploadTexture: true,
+        uvScale: fitTransformRef.current.uvScale,
+        uvOffset: fitTransformRef.current.uvOffset,
       });
       exportCanvas.toBlob(
         (blob) => {
@@ -423,12 +468,22 @@ export function StepStudio({
           </button>
 
           <div className="flex items-center gap-2 text-xs text-[#8E8A81] font-mono-nums">
-            <span>{mediaInfo.width} × {mediaInfo.height}</span>
+            <span>{exportDims.width} × {exportDims.height}</span>
             <span aria-hidden="true">·</span>
-            <span>{isVideoMode ? 'Vídeo / Motion' : 'Imagem estática'}</span>
+            <span>{isVideoMode ? 'Vídeo / Motion' : 'Imagem'}</span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onRandomizeEffect}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#2C2B28] bg-[#171614] px-3 py-1.5 text-xs font-medium text-[#D8D3C9] transition-colors hover:border-[#494640] hover:text-white whitespace-nowrap shrink-0 cursor-pointer"
+              title="Sortear outro preset, cores e parâmetros aleatoriamente"
+            >
+              <Shuffle className="h-3.5 w-3.5 text-[#F5F2EB]" aria-hidden="true" />
+              <span>Aleatório</span>
+            </button>
+
             <button
               type="button"
               onClick={onApplySmartAutoTune}
@@ -436,7 +491,7 @@ export function StepStudio({
               title="Reaplicar configuração calculada para esta mídia"
             >
               <Sparkles className="h-3.5 w-3.5 text-[#E11D48]" aria-hidden="true" />
-              <span>Ajuste inteligente</span>
+              <span>Inteligente</span>
             </button>
 
             <button
@@ -450,7 +505,7 @@ export function StepStudio({
               }`}
             >
               <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>{showOriginal ? 'Vendo original' : 'Ver original'}</span>
+              <span>{showOriginal ? 'Vendo original' : 'Original'}</span>
             </button>
           </div>
         </div>
@@ -532,15 +587,16 @@ export function StepStudio({
         <div className="flex flex-col gap-5">
           {/* Segmented Control Tabs */}
           <div
-            className="grid grid-cols-3 gap-1 rounded-lg bg-[#1D1C1A] p-1"
+            className="grid grid-cols-4 gap-1 rounded-lg bg-[#1D1C1A] p-1"
             role="tablist"
             aria-label="Controles do efeito"
           >
             {(
               [
                 { id: 'presets', label: 'Presets' },
-                { id: 'gradients', label: 'Gradient Maps' },
-                { id: 'params', label: 'Parâmetros' },
+                { id: 'gradients', label: 'Cores' },
+                { id: 'params', label: 'Ajustes' },
+                { id: 'format', label: 'Formato' },
               ] as const
             ).map((tab) => {
               const selected = activeTab === tab.id;
@@ -551,7 +607,7 @@ export function StepStudio({
                   role="tab"
                   aria-selected={selected}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`rounded-md px-2 py-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  className={`rounded-md px-1.5 py-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     selected
                       ? 'bg-[#2C2B28] text-[#F5F2EB]'
                       : 'text-[#8E8A81] hover:text-[#D8D3C9]'
@@ -794,6 +850,108 @@ export function StepStudio({
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>Restaurar ajuste inteligente</span>
               </button>
+            </div>
+          )}
+
+          {/* Tab 4: Formato e Tamanho */}
+          {activeTab === 'format' && (
+            <div className="flex flex-col gap-5" role="tabpanel" aria-label="Formato e tamanho">
+              <div>
+                <div className="mb-2.5 text-xs font-medium text-[#A8A39A]">
+                  Proporção da tela
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {ASPECT_OPTIONS.map((opt) => {
+                    const selected = formatConfig.aspectRatio === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => onUpdateFormatConfig({ aspectRatio: opt.id })}
+                        className={`flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors cursor-pointer ${
+                          selected
+                            ? 'border-[#E11D48] bg-[#1E1C1A]'
+                            : 'border-[#262522] bg-[#181715] hover:border-[#3A3833]'
+                        }`}
+                      >
+                        <span className="font-mono-nums text-xs font-semibold text-[#F5F2EB]">
+                          {opt.label}
+                        </span>
+                        <span className="truncate w-full text-[11px] text-[#8E8A81]">
+                          {opt.hint}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="border-t border-[#262522] pt-4">
+                <div className="mb-2.5 flex items-center justify-between text-xs">
+                  <span className="font-medium text-[#A8A39A]">Tamanho de saída</span>
+                  <span className="font-mono-nums text-[#F5F2EB]">
+                    {exportDims.width} × {exportDims.height} px
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {EXPORT_SIZE_OPTIONS.map((opt) => {
+                    const selected = formatConfig.exportSize === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => onUpdateFormatConfig({ exportSize: opt.id })}
+                        className={`flex flex-col items-start gap-0.5 rounded-xl border p-2.5 text-left transition-colors cursor-pointer ${
+                          selected
+                            ? 'border-[#E11D48] bg-[#1E1C1A]'
+                            : 'border-[#262522] bg-[#181715] hover:border-[#3A3833]'
+                        }`}
+                      >
+                        <span className="font-mono-nums text-xs font-semibold text-[#F5F2EB]">
+                          {opt.label}
+                        </span>
+                        <span className="text-[11px] text-[#8E8A81]">{opt.hint}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="border-t border-[#262522] pt-4">
+                <div className="mb-2.5 text-xs font-medium text-[#A8A39A]">
+                  Enquadramento
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      { id: 'cover', label: 'Preencher', hint: 'Recorte central' },
+                      { id: 'contain', label: 'Inteira', hint: 'Com margem papel' },
+                    ] as const
+                  ).map((mode) => {
+                    const selected = formatConfig.fitMode === mode.id;
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => onUpdateFormatConfig({ fitMode: mode.id })}
+                        className={`flex flex-col items-start gap-0.5 rounded-xl border p-2.5 text-left transition-colors cursor-pointer ${
+                          selected
+                            ? 'border-[#E11D48] bg-[#1E1C1A]'
+                            : 'border-[#262522] bg-[#181715] hover:border-[#3A3833]'
+                        }`}
+                      >
+                        <span className="text-xs font-semibold text-[#F5F2EB]">
+                          {mode.label}
+                        </span>
+                        <span className="text-[11px] text-[#8E8A81]">{mode.hint}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </div>

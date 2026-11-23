@@ -78,3 +78,39 @@ test('analyzeImagePixels detects warm bright media and picks retro/editorial pre
   assert.ok(result.warmth > 0.1);
   assert.ok(result.summaryTags.includes('Paleta quente'));
 });
+
+import { computeOutputDimensions, computeFitTransform } from './format';
+import { generateRandomLook } from './presets';
+
+test('computeOutputDimensions computes even dimensions for aspect ratios and sizes', () => {
+  const sq = computeOutputDimensions(960, 1200, '1:1', '1080');
+  assert.deepEqual(sq, { width: 1080, height: 1080 });
+
+  const wide = computeOutputDimensions(960, 1200, '16:9', '1920');
+  assert.equal(wide.width, 1920);
+  assert.equal(wide.height, 1080);
+
+  const portrait = computeOutputDimensions(1920, 1080, '4:5', '1080');
+  assert.equal(portrait.height, 1080);
+  assert.equal(portrait.width, 864);
+});
+
+test('computeFitTransform crops wider source cleanly in cover mode and pads in contain mode', () => {
+  const cover = computeFitTransform(1920, 1080, 1080, 1080, 'cover');
+  assert.ok(cover.uvScale[0] < 1);
+  assert.equal(cover.uvScale[1], 1);
+  assert.ok(cover.uvOffset[0] > 0);
+
+  const contain = computeFitTransform(1920, 1080, 1080, 1080, 'contain');
+  assert.equal(contain.uvScale[0], 1);
+  assert.ok(contain.uvScale[1] > 1);
+  assert.ok(contain.uvOffset[1] < 0);
+});
+
+test('generateRandomLook picks a different preset and stays within valid bounds', () => {
+  const look = generateRandomLook('riso-rosa', 'riso-rosa', () => 0.42);
+  assert.notEqual(look.presetId, 'riso-rosa');
+  assert.equal(look.params.intensity, 1);
+  assert.ok(look.params.contrast >= 0.35 && look.params.contrast <= 0.9);
+  assert.ok(look.params.halftoneAngle >= 10 && look.params.halftoneAngle <= 65);
+});

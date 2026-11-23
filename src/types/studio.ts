@@ -42,6 +42,18 @@ export interface MediaAnalysis {
   summaryTags: string[];
 }
 
+export type AspectRatioId = 'original' | '1:1' | '4:5' | '3:4' | '16:9' | '9:16';
+
+export type ExportSizeId = 'original' | '1080' | '1920' | '2400';
+
+export type FitMode = 'cover' | 'contain';
+
+export interface MediaFormatConfig {
+  aspectRatio: AspectRatioId;
+  exportSize: ExportSizeId;
+  fitMode: FitMode;
+}
+
 export interface MediaSourceInfo {
   id: string;
   name: string;

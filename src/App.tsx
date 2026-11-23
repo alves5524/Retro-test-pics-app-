@@ -7,11 +7,17 @@ import type {
   EffectParams,
   GradientMap,
   MediaAnalysis,
+  MediaFormatConfig,
   MediaSourceInfo,
   StepId,
 } from './types/studio';
 import { analyzeImagePixels } from './engine/analyzer';
-import { getGradientMapById, getPresetById, PRINT_PRESETS } from './engine/presets';
+import {
+  generateRandomLook,
+  getGradientMapById,
+  getPresetById,
+  PRINT_PRESETS,
+} from './engine/presets';
 import { createSamplePhotoCanvas, drawProceduralMotionFrame } from './utils/sampleMedia';
 
 function extractPixelsFromSource(
@@ -46,6 +52,11 @@ export default function App() {
     getGradientMapById(PRINT_PRESETS[0].gradientMapId)
   );
   const [params, setParams] = useState<EffectParams>(() => ({ ...PRINT_PRESETS[0].params }));
+  const [formatConfig, setFormatConfig] = useState<MediaFormatConfig>({
+    aspectRatio: 'original',
+    exportSize: 'original',
+    fitMode: 'cover',
+  });
   const [isExporting, setIsExporting] = useState(false);
 
   const primarySaveRef = useRef<(() => void) | null>(null);
@@ -82,6 +93,11 @@ export default function App() {
       setActivePresetId(result.recommendedPresetId);
       setGradientMap(getGradientMapById(result.recommendedGradientId));
       setParams({ ...result.optimizedParams });
+      setFormatConfig({
+        aspectRatio: 'original',
+        exportSize: 'original',
+        fitMode: 'cover',
+      });
       setErrorMessage(null);
 
       if (skipDelay) {
@@ -272,6 +288,13 @@ export default function App() {
     setParams({ ...analysis.optimizedParams });
   };
 
+  const handleRandomizeEffect = () => {
+    const next = generateRandomLook(activePresetId, gradientMap.id);
+    setActivePresetId(next.presetId);
+    setGradientMap(next.gradientMap);
+    setParams(next.params);
+  };
+
   const handleChangeMedia = () => {
     cleanupMediaUrls();
     if (videoEl) {
@@ -327,11 +350,16 @@ export default function App() {
           activePresetId={activePresetId}
           gradientMap={gradientMap}
           params={params}
+          formatConfig={formatConfig}
           onSelectPreset={handleSelectPreset}
           onSelectGradientMap={handleSelectGradientMap}
           onUpdateGradientColor={handleUpdateGradientColor}
           onUpdateParam={handleUpdateParam}
+          onUpdateFormatConfig={(patch) =>
+            setFormatConfig((prev) => ({ ...prev, ...patch }))
+          }
           onApplySmartAutoTune={handleApplySmartAutoTune}
+          onRandomizeEffect={handleRandomizeEffect}
           onChangeMedia={handleChangeMedia}
           registerPrimarySaveHandler={(fn) => {
             primarySaveRef.current = fn;
